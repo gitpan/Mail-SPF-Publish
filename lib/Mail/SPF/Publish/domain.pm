@@ -1,5 +1,7 @@
 package Mail::SPF::Publish::domain;
 
+use strict;
+
 sub new {
   my $class = shift;
   my $self = bless {
@@ -50,6 +52,18 @@ sub fullname {
   }
 }
 
+sub output {
+  my $self = shift;
+  my $type = shift;
+
+  if ($type =~ m/^bind9$/i) {
+    return $self->bind_out();
+  }
+  elsif ( $type =~ m/^tinydns$/i) {
+    return $self->tinydns_out();
+  }
+}
+
 sub bind_out {
   my $self = shift;
   my $subdomains = $self->domains();
@@ -60,7 +74,6 @@ sub bind_out {
   if( @$records ) {
     foreach my $record (@$records) {
       my $value = ( uc($record->type()) eq 'TXT' ? '"' . $record->value() . '"' : $record->value() );
-#      printf( "%50s\t%s\t%s\t%s\t%s\n", $self->fullname(), $record->ttl(), $record->class(), $record->type(), $value );
       $output .= sprintf( "%s\t%s\t%s\t%s\t%s\n", $self->fullname, $record->ttl(), $record->class(), $record->type(), $value );
     }
   }
@@ -88,8 +101,10 @@ sub tinydns_out {
         $output .= "+";
       }
       my $fullname = $self->fullname();
+      my $value = $record->value();
+      $value =~ s/(:)/sprintf("\\%#o", ord($1))/eg;
       $fullname =~ s/.$//; # This is such a dirty hack, somebody hurt me.
-      $output .= $fullname . ":" . $record->value() . ":" . $record->ttl() . "\n";
+      $output .= $fullname . ":" . $value . ":" . $record->ttl() . "\n";
     }
   }
 
@@ -98,6 +113,33 @@ sub tinydns_out {
     $output .= $subdomain->tinydns_out();
   }
   return $output;
+}
+
+sub descend {
+  my $self = shift;
+  my $next_name = shift;
+
+  my $domains = $self->domains();
+
+  unless( $next_name =~ s/([^.]+)\.?$// ) {
+    _die( "Invalid domain name to descend upon: $next_name\n" );
+  }
+
+  my $name = $1;
+
+  $domains->{$name} = $self->new($self, $name)
+    unless( exists $domains->{$name} );
+
+  if ( $next_name =~ /^\.?$/ ) {
+    return $domains->{$name};
+  }
+  else {
+    return $domains->{$name}->descend( $next_name );
+  }
+}
+
+sub _die {
+  die( @_ );
 }
 
 1;

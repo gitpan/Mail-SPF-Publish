@@ -2,17 +2,19 @@
 
 use strict;
 use lib "../lib/";
-use Mail::SPF::Publish qw(:all);
+use Mail::SPF::Publish;
 
-spf_mailserver( "mail_one", "mail1.example.com", "10.0.0.1" );
-spf_mailserver( "mail_two", "mail2.example.com", "10.0.0.2" );
+my $spf = Mail::SPF::Publish->new( explicit_wildcards => 0, output_type => 'tinydns' );
 
-spf_domainservers( "example.com", "mail_one", "mail_two" );
+$spf->mailserver( "mail_one", "mail1.example.com", "10.0.0.1" );
+$spf->mailserver( "mail_two", "mail2.example.com", "10.0.0.2" );
 
-spf_fix_recursion();
+$spf->domainservers( "example.com", "mail_one", "mail_two" );
 
-print spf_output_bind9();
+print $spf->output(explicit_wildcards => 1, output_type => 'bind9');
 
 print "\n\n";
 
-print spf_output_tinydns();
+$spf->domainincludes( "example.com:10", "example.net", "example.org" );
+
+print $spf->output();

@@ -5,14 +5,16 @@ NAME
 SYNOPSIS
       use Mail::SPF::Publish
  
-      spf_mailserver( "mail_one", "mail1.example.com", "10.0.0.1" );
-      spf_mailserver( "mail_two", "mail2.example.com", "10.0.0.2" );
+      my $spf = Mail::SPF::Publish->new( ttl => 86400 );
 
-      spf_domainservers( "example.com", "mail_one", "mail_two" );
+      $spf->mailserver( "mail_one", "mail1.example.com", "10.0.0.1" );
+      $spf->mailserver( "mail_two", "mail2.example.com", "10.0.0.2" );
 
-      spf_fix_recursion();
+      $spf->domainservers( "example.com", "mail_one", "mail_two" );
 
-      print spf_output_bind9();
+      $spf->domainincludes( "example.com", "example.net", "example.org" );
+
+      print $spf->output( output_type => 'bind9' );
 
 DESCRIPTION
     This module and it's associated sample code are intended to be used to
@@ -23,26 +25,126 @@ DESCRIPTION
     first release.
 
 USAGE
-  spf_mailserver
-     Usage     : spf_mailserver( alias, hostname, address );
-     Purpose   : Defines a mail server alias, and creates the SPF records for HELO lookups.
-     Returns   : Nothing yet
-     Arguments : alias    - string alias for this entry
-                 hostname - fully qualified domain name this mail server, and hostname name supplied at HELO phase.
-                 address  - network address of this mail server
+  new
+    Usage
+          my $spf = Mail::SPF::Publish->new();
 
-  spf_domainservers
-     Usage     : spf_domainservers( domain, alias, ... )
-     Purpose   : Create SPF records to indicate that servers identified by 'alias, ...' are allowed to send from 'domain'. All others are subject to the policy defined by spf_softhard()
-     Returns   : Nothing Yet
-     Arguments : domain - Domain name to which you are adding mail servers to for SPF record generation.
-                 alias, ... - List of server aliases, defined with the spf_mailserver() function.
+    Purpose
+        Creates a new SPF publishing module
 
-  spf_fix_recursion
-     Usage     : spf_fix_recursion()
-     Purpose   : Creates explicit wildcard domains to allow a workaround for RFC 1034 compliant name servers
-     Returns   : Nothing yet
-     Argument  : None
+    Returns
+        The object it just created.
+
+    Arguments
+
+        explicit_wildcards
+            Sets whether explicit wildcards are to be generated (Default: 1)
+
+        output_type
+            Sets the type of output you want, currently only two possible
+            values: 'bind9' and 'tinydns'. (Default: 'bind9' )
+
+        ttl Sets the ttl for all entires in the generated DNS heirarchy.
+            (Default: 86400)
+
+        deny
+            Sets the deny string for SPF deny records on dommains (but not
+            on individual machines). Logical values would be 'deny' or
+            'softdeny'. (Default: 'deny')
+
+  mailserver
+    Usage
+          $spf->mailserver( alias, hostname, address );
+
+    Purpose
+        Defines a mail server alias, and creates the SPF records for HELO
+        lookups.
+
+    Returns
+        Nothing yet
+
+    Arguments
+
+        alias
+            string alias for this entry
+
+        hostname
+            fully qualified domain name this mail server, and hostname name
+            supplied at HELO phase.
+
+        address
+            network address of this mail server (currently only an ipv4
+            address is supported)
+
+  domainservers
+    Usage
+          $spf->domainservers( domain, alias, ... )
+
+    Purpose
+        Create SPF records to indicate that servers identified by 'alias,
+        ...' are allowed to send from 'domain'. All others are subject to
+        the policy defined by softhard()
+
+    Returns
+        Nothing Yet
+
+    Arguments
+
+        domain
+            Domain name to which you are adding mail servers to for SPF
+            record generation.
+
+        alias, ...
+            List of server aliases, defined with the mailserver() function.
+
+  domainincludes
+    Usage
+          $spf->domainincludes( source_domain, domain, ... )
+
+    Purpose
+        Creates 'SPFinclude=source_domain' TXT records in each of the
+        supplied domains to cause a recursive lookup for allowed sending
+        servers.
+
+    Arguments
+
+        source_domain
+            Domain which each of the domain entries will point to with an
+            SPFinclude record.
+
+        domain, ...
+            List of domains which SPFinclude records will be created in.
+            This list will probably be of uncreated domains
+
+    Notes
+        If you are using this module to maintain the SPF records for both
+        the source_domain and any of the other domains; you may wish to use
+        domainservers() instead for these records. While domainincludes()
+        does simplify the creation of multiple domains, it increases the
+        number of DNS lookups that must be made. Put otherwise, in order to
+        minimize traffic you should use this call as little as possible.
+
+  output
+    Usage
+          print $spf->output();
+
+        or
+
+          my $output = $spf->output();
+
+    Purpose
+        Compiles domain information collected by all the previous method
+        calls, and produces an output suitable for use in the specified (or
+        default, if you didn't specify) name server.
+
+    Returns
+        A multi-line string containing the output.
+
+    Arguments
+        This function will take an 'explicit_wildcards' and 'output_type'
+        option as documented under the new() function. The supplied values
+        will be used to override the default provided in the new() function
+        for the current run only.
 
 BUGS
     Undoubtably some, tests are the next thing on the list to be written.
@@ -61,5 +163,5 @@ COPYRIGHT
     with this module.
 
 SEE ALSO
-    http://spf.pobox.com/ Mail::SPF::Query perl(1).
+    http://spf.pobox.com/ Mail::SPF::Query
 

@@ -2,7 +2,7 @@ package Mail::SPF::Publish;
 use strict;
 
 use vars qw ($VERSION);
-$VERSION     = '0.01';
+$VERSION     = '0.02';
 
 use Net::CIDR;
 use Mail::SPF::Publish::domain;
@@ -36,7 +36,12 @@ Mail::SPF::Publish - Assist in the creation of DNS records for the SPF standard.
 
 =head1 DESCRIPTION
 
-This module and it's associated sample code are intended to be used to generate DNS zone files for SPF under tinydns and bind4-9, including any explicit wildcard recursion if necessary. Most people will want to use the supplied scripts for automatic generation of a zone, 'autospf' and 'spf2zone'.
+This module and its associated sample code are intended to
+be used to generate DNS zone files for SPF under tinydns and
+bind4-9, including any explicit wildcard recursion if
+necessary. Most people will want to use the supplied scripts
+for automatic generation of a zone, 'autospf' and
+'spf2zone'.
 
 =head1 USAGE
 
@@ -486,11 +491,11 @@ Undoubtably others.
 
 =head1 SUPPORT
 
-Please contact the authors with any comments or questions.
+Send a message to subscribe-spf-discuss@v2.listbox.com.
 
-=head1 AUTHORS
+See also http://spf.pobox.com/
 
-Meng Weng Wong
+=head1 AUTHOR
 
 Jonathan Steinert
 hachi@cpan.org

@@ -10,7 +10,9 @@ WriteMakefile(
     Net::CIDR => 0,
   },
   dist => {
-    COMPRESS	=> "gzip -9",
+    COMPRESS	=> 'gzip -9',
+    SUFFIX	=> 'gz',
+    PREOP	=> q[pod2text lib/Mail/SPF/Publish.pm > ./$(DISTNAME)-$(VERSION)/README],
   },
 );
   

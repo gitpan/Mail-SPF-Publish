@@ -7,17 +7,23 @@ SYNOPSIS
  
       my $spf = Mail::SPF::Publish->new( ttl => 86400 );
 
-      $spf->mailserver( "mail_one", "mail1.example.com", "10.0.0.1" );
-      $spf->mailserver( "mail_two", "mail2.example.com", "10.0.0.2" );
+        # Basic form
+      $spf->mailserver( "mail_one", "mail1.example.com", [ "10.0.0.1" ] );
 
-      $spf->domainservers( "example.com", "mail_one", "mail_two" );
+        # Multi-homed mail server
+      $spf->mailserver( "mail_two", "mail2.example.com", [ "10.0.0.2", "192.168.0.1" ] );
 
-      $spf->domainincludes( "myvanity.com", "myisp.com", "myschool.edu" );
+        # Multi-homed mail server with CIDR style notation
+      $spf->mailserver( "mail_three", "mail3.example.com", [ "10.0.0.8/30", "192.168.8.0/29" ] );
+
+      $spf->domainservers( "example.com", [ "mail_one", "mail_two", "mail_three" ], default => 'softdeny');
+
+      $spf->domainincludes( "myvanity.com", [ "myisp.com", "myschool.edu" ], ttl => 86400 );
 
       print $spf->output( format => 'bind4' );
 
 DESCRIPTION
-    This module and it's associated sample code are intended to be used to
+    This module and its associated sample code are intended to be used to
     generate DNS zone files for SPF under tinydns and bind4-9, including any
     explicit wildcard recursion if necessary. Most people will want to use
     the supplied scripts for automatic generation of a zone, 'autospf' and
@@ -53,14 +59,11 @@ USAGE
 
   mailserver
     Usage
-          $spf->mailserver( alias, hostname, address );
+          $spf->mailserver( alias, hostname, addresslist, options );
 
     Purpose
         Defines a mail server alias, and creates the SPF records for HELO
         lookups.
-
-    Returns
-        Nothing yet
 
     Arguments
 
@@ -71,21 +74,17 @@ USAGE
             fully qualified domain name this mail server, and hostname name
             supplied at HELO phase.
 
-        address
-            network address of this mail server (currently only an ipv4
-            address is supported)
+        addresslist
+            arrayref of network address of this mail server (currently only
+            ipv4 addresses are supported, CIDR notation is optional.)
 
   domainservers
     Usage
-          $spf->domainservers( domain, alias, ... )
+          $spf->domainservers( domain, aliaslist, options )
 
     Purpose
-        Create SPF records to indicate that servers identified by 'alias,
-        ...' are allowed to send from 'domain'. All others are subject to
-        the policy defined by softhard()
-
-    Returns
-        Nothing Yet
+        Create SPF records to indicate that servers identified by
+        *aliaslist* are allowed to send from *domain*.
 
     Arguments
 
@@ -93,12 +92,17 @@ USAGE
             Domain name to which you are adding mail servers to for SPF
             record generation.
 
-        alias, ...
-            List of server aliases, defined with the mailserver() function.
+        aliaslist
+            Arrayref of server aliases, defined with the mailserver()
+            function.
+
+        options
+            Option list to override default options, and those specified in
+            new().
 
   domainincludes
     Usage
-          $spf->domainincludes( my_domain, other_domain, ... )
+          $spf->domainincludes( my_domain, other_domain_list, options )
 
     Purpose
         Creates 'SPFinclude=other_domain' TXT records for my_domain; this
@@ -109,10 +113,10 @@ USAGE
         my_domain
             Domain under our control.
 
-        other_domain, ...
-            List of domains which SPFinclude records will point to. These
-            domains are not under our control, but we want to designate
-            their servers.
+        other_domain_list
+            Arrayref of domains which SPFinclude records will point to.
+            These domains are not under our control, but we want to
+            designate their servers.
 
     Notes
         If the other_domains are under your control, use domainservers() to
@@ -121,11 +125,11 @@ USAGE
 
   output
     Usage
-          print $spf->output();
+          print $spf->output( options );
 
         or
 
-          my $output = $spf->output();
+          my $output = $spf->output( options );
 
     Purpose
         Compiles domain information collected by all the previous method
@@ -136,16 +140,21 @@ USAGE
         A multi-line string containing the output.
 
     Arguments
-        This function will take an 'explicit_wildcards' and 'format' option
+        This function will take an *explicit_wildcards* and *format* option
         as documented under the new() function. The supplied values will be
         used to override the default provided in the new() function for the
-        current run only.
+        current call only.
 
 BUGS
-    Undoubtably some, tests are the next thing on the list to be written.
+    Entering anything besides IPv4 addresses into address lists may throw an
+    error, or may just mangle the output.
+
+    Undoubtably others.
 
 SUPPORT
-    Please contact the author with any comments or questions.
+    Send a message to subscribe-spf-discuss@v2.listbox.com.
+
+    See also http://spf.pobox.com/
 
 AUTHOR
     Jonathan Steinert hachi@cpan.org

@@ -2,7 +2,6 @@ Changes
 LICENSE
 MANIFEST
 Makefile.PL
-README
 Todo
 lib/Mail/SPF/Publish.pm
 lib/Mail/SPF/Publish/domain.pm

@@ -1,9 +1,9 @@
 Revision history for Perl module Mail::SPF::Publish
 
-0.01_01 Tue Jul 8 20:22:00 2003
-        - First release, devel only
+0.02 Tue Aug 7 23:47:00 2003
+	- Fix documentation problems (forgot to cvs up before make dist)
+	- Change README to be autogen at make dist time.
 
-0.00 Sat Jun 28 17:18:09 2003
-	- original version; created by ExtUtils::ModuleMaker 0.32
-
+0.01 Tue Aug 7 21:42:00 2003
+        - First release
 

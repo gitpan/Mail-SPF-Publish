@@ -8,4 +8,7 @@ lib/Mail/SPF/Publish.pm
 lib/Mail/SPF/Publish/domain.pm
 lib/Mail/SPF/Publish/record.pm
 scripts/sample.pl
+scripts/autospf
+scripts/spf2zone
 t/001_load.t
+t/002_support_modules.t

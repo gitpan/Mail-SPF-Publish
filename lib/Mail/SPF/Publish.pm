@@ -2,8 +2,9 @@ package Mail::SPF::Publish;
 use strict;
 
 use vars qw ($VERSION);
-$VERSION     = '0.00_02';
+$VERSION     = '0.01';
 
+use Net::CIDR;
 use Mail::SPF::Publish::domain;
 use Mail::SPF::Publish::record;
 
@@ -17,20 +18,25 @@ Mail::SPF::Publish - Assist in the creation of DNS records for the SPF standard.
  
   my $spf = Mail::SPF::Publish->new( ttl => 86400 );
 
-  $spf->mailserver( "mail_one", "mail1.example.com", "10.0.0.1" );
-  $spf->mailserver( "mail_two", "mail2.example.com", "10.0.0.2" );
+    # Basic form
+  $spf->mailserver( "mail_one", "mail1.example.com", [ "10.0.0.1" ] );
 
-  $spf->domainservers( "example.com", "mail_one", "mail_two" );
+    # Multi-homed mail server
+  $spf->mailserver( "mail_two", "mail2.example.com", [ "10.0.0.2", "192.168.0.1" ] );
 
-  $spf->domainincludes( "example.com", "example.net", "example.org" );
+    # Multi-homed mail server with CIDR style notation
+  $spf->mailserver( "mail_three", "mail3.example.com", [ "10.0.0.8/30", "192.168.8.0/29" ] );
 
-  print $spf->output( output_type => 'bind9' );
+  $spf->domainservers( "example.com", [ "mail_one", "mail_two", "mail_three" ], default => 'softdeny');
+
+  $spf->domainincludes( "myvanity.com", [ "myisp.com", "myschool.edu" ], ttl => 86400 );
+
+  print $spf->output( format => 'bind4' );
 
 
 =head1 DESCRIPTION
 
-This module and it's associated sample code are intended to be used to generate DNS records (tinydns and BIND9 so far) for SPF, including any explicit wildcard recursion if necessary. The interface right now is /very/ questionable as this has not been proofread by anyone yet. Please be warned that this module may change considerable or not at all before first release.
-
+This module and it's associated sample code are intended to be used to generate DNS zone files for SPF under tinydns and bind4-9, including any explicit wildcard recursion if necessary. Most people will want to use the supplied scripts for automatic generation of a zone, 'autospf' and 'spf2zone'.
 
 =head1 USAGE
 
@@ -58,18 +64,20 @@ The object it just created.
 
 Sets whether explicit wildcards are to be generated (Default: 1)
 
-=item output_type
+=item format
 
-Sets the type of output you want, currently only two possible values: 'bind9' 
-and 'tinydns'. (Default: 'bind9' )
+Sets the type of output you want, currently only two possible values: 'bind4' 
+and 'tinydns'. (Default: 'bind4' )
 
 =item ttl
 
 Sets the ttl for all entires in the generated DNS heirarchy. (Default: 86400)
 
-=item deny
+=item default
 
-Sets the deny string for SPF deny records on dommains (but not on individual machines). Logical values would be 'deny' or 'softdeny'. (Default: 'deny')
+Sets the default response for domains (but not on individual
+machines).  You may set 'deny', 'softdeny', or
+'accept'. (Default: 'deny')  Please don't set 'accept'.
 
 =back
 
@@ -85,19 +93,21 @@ sub new {
     aliases => {},
     domains => {},
     options => {
-      deny => 'deny',
+      default => 'deny',
       ttl => 86400,
-      output_type => 'bind9',
+      format => 'bind4',
       explicit_wildcards => 1, 
     },
   }, (ref( $class ) || $class);
 
   my $options = $self->{options};
 
-  $options->{output_type} = $args{output_type} if exists( $args{output_type} );
+  $options->{format} = $args{format} if exists( $args{format} );
   $options->{explicit_wildcards} = $args{explicit_wildcards} if exists( $args{explicit_wildcards} );
   $options->{ttl} = $args{ttl} if exists( $args{ttl} );
-  $options->{deny} = $args{deny} if exists( $args{deny} );
+  $options->{default} = $args{default} if exists( $args{default} );
+
+  $options->{explicit_wildcards} = 0 if $args{output_type} eq "tinydns";
 
   return $self;
 }
@@ -108,15 +118,11 @@ sub new {
 
 =item Usage
 
-  $spf->mailserver( alias, hostname, address );
+  $spf->mailserver( alias, hostname, addresslist, options );
 
 =item Purpose
 
 Defines a mail server alias, and creates the SPF records for HELO lookups.
-
-=item Returns
-
-Nothing yet
 
 =item Arguments
 
@@ -130,10 +136,10 @@ string alias for this entry
 
 fully qualified domain name this mail server, and hostname name supplied at HELO phase.
 
-=item address
+=item addresslist
 
-network address of this mail server (currently only an ipv4 address is
-supported)
+arrayref of network address of this mail server (currently only ipv4 addresses are
+supported, CIDR notation is optional.)
 
 =back
 
@@ -141,11 +147,20 @@ supported)
 
 =cut
 
-sub mailserver ($$$$) {
+sub mailserver ($$$$;@) {
   my $self = shift;
-  my ($alias, $hostname, $address) = @_;
+  my ($alias, $hostname, $addresses, %options) = @_;
+  my @addresses;
 
-  $self->{aliases}->{$alias} = [ $hostname, $address ];
+  if (ref $addresses eq 'ARRAY') {
+    foreach my $address (@$addresses) {
+      push @addresses, _check_and_cidrize( $address );
+    }
+  } else {
+    push @addresses, _check_and_cidrize( $addresses );
+  }
+  
+  $self->{aliases}->{$alias} = [ $hostname, \@addresses, \%options ];
 }
 
 =head2 domainservers
@@ -154,15 +169,11 @@ sub mailserver ($$$$) {
 
 =item Usage
 
-  $spf->domainservers( domain, alias, ... )
+  $spf->domainservers( domain, aliaslist, options )
 
 =item Purpose
 
-Create SPF records to indicate that servers identified by 'alias, ...' are allowed to send from 'domain'. All others are subject to the policy defined by softhard()
-
-=item Returns
-
-Nothing Yet
+Create SPF records to indicate that servers identified by I<aliaslist> are allowed to send from I<domain>.
 
 =item Arguments
 
@@ -172,9 +183,13 @@ Nothing Yet
 
 Domain name to which you are adding mail servers to for SPF record generation.
 
-=item alias, ... 
+=item aliaslist
 
-List of server aliases, defined with the mailserver() function.
+Arrayref of server aliases, defined with the mailserver() function.
+
+=item options
+
+Option list to override default options, and those specified in new().
 
 =back
 
@@ -184,9 +199,14 @@ List of server aliases, defined with the mailserver() function.
 
 sub domainservers ($$@) {
   my $self = shift;
-  my ($domain, @aliases) = @_;
-
-  $self->{domains}->{$domain} = \@aliases;
+  if (ref $_[1] eq 'ARRAY') {
+    my ($domain, $aliases, %options) = @_;
+    $self->{domains}->{$domain} = [$aliases, \%options];
+  } else {
+    my ($domain, @aliases) = @_;
+    my %options;
+    $self->{domains}->{$domain} = [\@aliases, \%options];
+  }
 }
 
 =head2 domainincludes
@@ -195,29 +215,35 @@ sub domainservers ($$@) {
 
 =item Usage
 
-  $spf->domainincludes( source_domain, domain, ... )
+  $spf->domainincludes( my_domain, other_domain_list, options )
 
 =item Purpose
 
-Creates 'SPFinclude=source_domain' TXT records in each of the supplied domains to cause a recursive lookup for allowed sending servers.
+Creates 'SPFinclude=other_domain' TXT records for my_domain;
+this allows my_domain to designate mailservers belonging to
+other_domain.
 
 =item Arguments
 
 =over
 
-=item source_domain
+=item my_domain
 
-Domain which each of the domain entries will point to with an SPFinclude record.
+Domain under our control.
 
-=item domain, ...
+=item other_domain_list
 
-List of domains which SPFinclude records will be created in. This list will probably be of uncreated domains
+Arrayref of domains which SPFinclude records will point to.
+These domains are not under our control, but we want to
+designate their servers.
 
 =back
 
 =item Notes
 
-If you are using this module to maintain the SPF records for both the source_domain and any of the other domains; you may wish to use domainservers() instead for these records. While domainincludes() does simplify the creation of multiple domains, it increases the number of DNS lookups that must be made. Put otherwise, in order to minimize traffic you should use this call as little as possible.
+If the other_domains are under your control, use
+domainservers() to create full-fledged entries for them
+directly; this improves query time and saves traffic.
 
 =back
 
@@ -225,9 +251,14 @@ If you are using this module to maintain the SPF records for both the source_dom
 
 sub domainincludes ($$@) {
   my $self = shift;
-  my ($source, @domains) = @_;
-
-  $self->{includes}->{$source} = \@domains;
+  if (ref $_[1] eq 'ARRAY') {
+    my ($mydomain, $domains, %options) = @_;
+    $self->{includes}->{$mydomain} = [$domains, \%options];
+  } else {
+    my ($mydomain, @domains) = @_;
+    my %options;
+    $self->{includes}->{$mydomain} = [\@domains, \%options];
+  }
 }
 
 =head2 output
@@ -236,11 +267,11 @@ sub domainincludes ($$@) {
 
 =item Usage
 
-  print $spf->output();
+  print $spf->output( options );
 
 or
 
-  my $output = $spf->output();
+  my $output = $spf->output( options );
 
 =item Purpose
 
@@ -252,7 +283,7 @@ A multi-line string containing the output.
 
 =item Arguments
 
-This function will take an 'explicit_wildcards' and 'output_type' option as documented under the new() function. The supplied values will be used to override the default provided in the new() function for the current run only.
+This function will take an I<explicit_wildcards> and I<format> option as documented under the new() function. The supplied values will be used to override the default provided in the new() function for the current call only.
 
 =back
 
@@ -264,35 +295,52 @@ sub output ($;@) {
 
   $self->{nets} =  Mail::SPF::Publish::domain->new( undef, '' ), #has no parent, things shouldn't recurse upwards past here
 
-  my %options = ( %{$self->{options}}, @args );
+  my %global_options = ( %{$self->{options}}, @args );
 
   while (my ($key, $value) = each %{$self->{aliases}}) {
-    my ($hostname, $address) = @$value;
-    my $rnumbers = _rnumbers( $address );
-    $self->_create_spf_record( "*._smtp_client.$hostname", 'deny' );
-    $self->_create_spf_record( "$rnumbers.in-addr._smtp_client.$hostname", 'allow' );
-  }
-
-  while (my ($key, $value) = each %{$self->{domains}}) {
-    $self->_create_spf_record( "*._smtp_client.$key", $self->{deny} );
-
-    foreach my $alias (@$value) {
-      my ($hostname, $address) = @{$self->{aliases}->{$alias}};
+    my ($hostname, $addresses, $alias_options) = @$value;
+    my $options = {%global_options, %$alias_options};
+    foreach my $address (_colapse_numbers( @$addresses )) {
       my $rnumbers = _rnumbers( $address );
-      $self->_create_spf_record( "$rnumbers.in-addr._smtp_client.$key", 'allow' );
+      $self->_create_spf_record( "*._smtp_client.$hostname", 'deny', $options ); # always deny for mailservers.
+      $self->_create_spf_record( "$rnumbers.in-addr._smtp_client.$hostname", 'allow', $options );
     }
   }
 
-  while (my ($source, $includes) = each %{$self->{includes}}) {
+  while (my ($domain, $value) = each %{$self->{domains}}) {
+    my ($aliases, $domain_options) = @$value;
+    my $options = {%global_options, %$domain_options};
+    
+    {
+      my $options = {%global_options, %$domain_options};
+      $self->_create_spf_record( "*._smtp_client.$domain", $options->{default}, $options );
+    }
+
+    my @numbers;
+    
+    foreach my $alias (@$aliases) {
+      my ($hostname, $addresses, $alias_options) = @{$self->{aliases}->{$alias}};
+      push @numbers, @$addresses;
+    }
+      
+    foreach my $number (_colapse_numbers( @numbers )) {
+      my $rnumber = _rnumbers( $number );
+      $self->_create_spf_record( "$rnumber.in-addr._smtp_client.$domain", 'allow', $options );
+    }
+  }
+
+  while (my ($mydomain, $value) = each %{$self->{includes}}) {
+    my ($includes, $include_options) = @$value;
+    my $options = {%global_options, %$include_options};
     foreach my $include (@$includes) {
-      $self->_create_spf_include( "*._smtp_client.$include", $source );
+      $self->_create_spf_include( "*._smtp_client.$mydomain", $include, $options );
     }
   }
 
   _fix_recursion( $self->{nets} )
-    if ($options{explicit_wildcards});
+    if ($global_options{explicit_wildcards});
   
-  $self->{nets}->output( $options{output_type} );
+  $self->{nets}->output( $global_options{format} );
 }
 
 ####################################################################
@@ -347,9 +395,7 @@ sub _fix_recursion {
     _fix_recursion( $subdomain );
   }
 
-  foreach my $record (@{$domain->records()}) {
-    return if ( ( uc( $record->type() ) eq 'TXT' ) && ( $record->value() =~ m/^spf=/ ) );
-  }
+  return if (_get_spf( $domain ));
 
   unless( exists $subdomains->{'*'} && _get_spf( $subdomains->{'*'} ) ) {
     return unless $domain->parent();
@@ -365,13 +411,13 @@ sub _fix_recursion {
 
 sub _create_spf_record {
   my $self = shift;
-  my ($basename, $policy) = @_;
+  my ($basename, $policy, $options) = @_;
 
   my $domain = $self->{nets}->descend( $basename );
   
   my $record;
   if ($record = _get_spf( $domain )) {
-    $record->ttl( $self->{ttl} );
+    $record->ttl( $options->{ttl} );
     $record->class( 'IN' );
     $record->type( 'TXT' );
     $record->value( 'spf=' . $policy );
@@ -379,7 +425,7 @@ sub _create_spf_record {
   else {
     my $records = $domain->records();
     push @$records, Mail::SPF::Publish::record->new(
-      ttl => $self->{options}->{ttl},
+      ttl => $options->{ttl},
       class => 'IN',
       type => 'TXT',
       value => "spf=$policy",
@@ -389,15 +435,44 @@ sub _create_spf_record {
 
 sub _create_spf_include {
   my $self = shift;
-  my ($basename, $policy) = @_;
+  my ($basename, $policy, $options) = @_;
 
   my $domain = $self->{nets}->descend( $basename );
   my $records = $domain->records();
   push @$records, Mail::SPF::Publish::record->new(
-    ttl => $self->{options}->{ttl},
+    ttl => $options->{ttl},
     class => 'IN',
     type => 'TXT',
     value => "SPFinclude=$policy" );
+}
+
+sub _colapse_numbers {
+  my @cidr_list;
+  foreach my $address (@_) {
+    @cidr_list = Net::CIDR::cidradd( $address, @cidr_list );
+  }
+  my @return_list;
+  foreach my $address (Net::CIDR::cidr2octets( @cidr_list )) {
+    unless ($address =~ m/^\d+\.\d+\.\d+\.\d+$/) {
+      $address .= '.*';
+    }
+    push @return_list, $address;
+  }
+  
+  return @return_list;
+}
+
+sub _check_and_cidrize {
+  my $address = $_[0];
+  if ($address =~ m/^\d+\.\d+\.\d+\.\d+$/) {
+    $address .= '/32';
+    return $address;
+  }
+  elsif ($address =~ m/^\d+\.\d+\.\d+\.\d+\/\d{0,2}/) {
+    return $address;
+  } else {
+    die( "Invalid ipv4 address: $address\n" );
+  }
 }
 
 1;
@@ -405,13 +480,17 @@ __END__
 
 =head1 BUGS
 
-Undoubtably some, tests are the next thing on the list to be written.
+Entering anything besides IPv4 addresses into address lists may throw an error, or may just mangle the output.
+
+Undoubtably others.
 
 =head1 SUPPORT
 
-Please contact the author with any comments or questions.
+Please contact the authors with any comments or questions.
 
-=head1 AUTHOR
+=head1 AUTHORS
+
+Meng Weng Wong
 
 Jonathan Steinert
 hachi@cpan.org

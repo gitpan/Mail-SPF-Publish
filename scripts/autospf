@@ -1,0 +1,228 @@
+#!/usr/bin/perl -sw-
+
+# ----------------------------------------------------------
+# 		         autospf.pl
+# 
+# 		       Meng Weng Wong
+# $Id: autospf,v 1.3 2003/08/05 22:24:59 mengwong Exp $
+# automatically generate a sample .spf config file based
+# on the local environment
+# 
+# usage: ./autospf.pl > auto.spf
+# 
+# arguments:
+# 
+# flags: -domain=xxx.com
+#        -default=softdeny
+# 
+# output:
+# 
+# license: GPL
+# 
+# see http://spf.pobox.com/
+# ----------------------------------------------------------
+
+# ----------------------------------------------------------
+# 		       initialization
+# ----------------------------------------------------------
+
+use Net::DNS;
+use Mail::SPF::Publish;
+use vars qw($domain $default);
+our ($VERSION) = '$Id: autospf,v 1.3 2003/08/05 22:24:59 mengwong Exp $' =~ /([\d.]{3,})/;
+
+# ----------------------------------------------------------
+# 	 no user-serviceable parts below this line
+# ----------------------------------------------------------
+
+use strict;
+
+# ----------------------------------------------------------
+#			    main
+# ----------------------------------------------------------
+
+my $RES = Net::DNS::Resolver->new;
+
+$domain  ||= guess_domain();
+$default ||= "deny";
+
+if ($default =~ /soft/) { $default = "softdeny" }
+if ($default =~ /fail/) { $default =     "deny" }
+
+my @mx = mx($domain);
+print header();
+
+my %allnames;
+foreach my $rr (sort { $a->preference <=> $b->preference } @mx) {
+  my ($shortname) = split /\./, my $hostname = $rr->exchange;
+  my @ips = name2ip($hostname);
+
+  # print "$hostname resolves to @ips\n";
+
+  push @{$allnames{$_}}, @ips for $hostname, names4ips(@ips);
+}
+
+my $longest_hostname  = 0;
+my $longest_shortname = 0;
+foreach my $hostname (keys %allnames) {
+  my ($shortname) = split /\./, $hostname;
+
+  $longest_shortname = length $shortname if length $shortname > $longest_shortname;
+  $longest_hostname  = length $hostname  if length $hostname  > $longest_hostname;
+  # $maxcount_wood   = chuck  $woodchuck if $woodchuck->can("chuck-wood")
+}
+
+my @shortnames;
+foreach my $hostname (sort { $allnames{$a}->[0] cmp $allnames{$b}->[0] } keys %allnames) {
+  push @shortnames, my ($shortname) = split /\./, $hostname;
+  my %ips; foreach my $ip (@{$allnames{$hostname}}) { $ips{$ip}++ };
+  my @ips = keys %ips;
+
+  printf "mailserver %-${longest_shortname}s   %${longest_hostname}s   %s\n", $shortname, $hostname, join " ", @ips;
+}
+
+print "\n";
+print "domaindefault $domain $default\n\n";
+print "domainservers $domain @shortnames\n\n";
+
+# ----------------------------------------------------------
+# 			 functions
+# ----------------------------------------------------------
+
+sub guess_domain {
+  # 
+  # find the closest parent domain which has MX records.
+  #
+  my $diestring = "unable to guess domain name.  Please run $0 -domain=example.com";
+
+  use Sys::Hostname;
+  my $hostname = hostname;
+  my @hostname = split /\./, $hostname;
+  
+  while (@hostname > 1) {
+    my $domain = join ".", @hostname;
+    return $domain if mx($domain);
+    shift @hostname;
+  }
+
+  die $diestring;
+}
+
+sub name2ip {
+  my $query = $RES->query(shift);
+  my @ips;
+
+  if ($query) {
+    if ($query->answer == 1 and ($query->answer)[0]->type eq "CNAME") { return name2ip(($query->answer)[0]->cname) }
+
+    push @ips, map { $_->address } grep { $_->type eq "A" } $query->answer;
+  }
+
+  return @ips;
+}
+
+sub names4ips {
+  my @ips = @_;
+
+
+  my %names;
+
+  foreach my $ip (@ips) {
+
+    # print "what are the hostnames for $ip?\n";
+
+    my $query = $RES->query(join (".", (reverse split /\./, $ip), "in-addr", "arpa"), "PTR");
+
+    if ($query) {
+      my @names = map { $_->ptrdname } grep { $_->type eq "PTR" } $query->answer;
+      # print "$ip PTRs to @names\n";
+      @names{@names} = ();
+    }
+  }
+
+  return keys %names;
+}
+
+sub header {
+
+  my $LOCALTIME = localtime;
+
+  return <<"EOTOP";
+#
+# Example SPF Publisher Configuration File
+# 
+# automatically generated $LOCALTIME
+#   by Mail::SPF::Publish $Mail::SPF::Publish::VERSION autospf.pl $VERSION 
+# For more information, see http://spf.pobox.com/
+# 
+# INTRODUCTION
+# 
+#   SPF records are for OUTBOUND mail servers for domains under your control.
+#   This example is based on MX records, which describe INBOUND mail servers.
+# 
+#   You need to READ THIS CAREFULLY and MAKE APPROPRIATE CHANGES before going live.
+# 
+#   You want to describe every OUTBOUND mail server for your domains here.
+# 
+# CONFIGURATION
+# 
+#   directive         default  | alternatives
+#   --------------------------------------------------
+#   format            bind4    | tinydns
+#   ttl               3600     | try 300 for testing, 86400 in production
+#   explicit          yes      | no         (does your BIND server need explicit wildcards?)
+#   domaindefault     deny     | softdeny
+# 
+# DEFINITIONS
+# 
+#   mailserver        mybox mybox.example.com 1.2.3.4/32 [...]
+# 
+#                     mybox is a mail gateway.
+#                     It identifies itself as mybox.example.com in the HELO line.
+#                     Its IP address is 1.2.3.4.
+#
+#                     For each outbound mail server you possess, ask yourself:
+#                     When it sends mail, what hostname does it use in the HELO line?
+#                     Use that hostname in place of "mybox.example.com".  It must be
+#                     a fully qualified domain name.
+#
+#                     The "mybox" field is a nickname for the machine.  Each machine
+#                     needs to have a unique nickname for later use by "domainservers".
+#
+#                     A host may have multiple IP addresses.  CIDR notation is supported.
+#
+#   domaindefault     example.com     deny
+#                     example.com softdeny
+#                     if you don't set this, "deny" is the default.
+#
+#                     You should set softdeny if you have legitimate users mailing
+#                     through non-designated machines.  During a transitional period,
+#                     while you convert your users to send mail through SMTP AUTH'ed
+#                     servers, you should set "softdeny".  After all your users have
+#                     switched to using a designated server, set "deny".
+#
+#   domainservers     example.com mybox [...]
+# 
+#                     example.com designates mybox as an outbound mail exchanger.
+#                     example.com may designate more than one mailserver.
+# 
+#   domaincopy        example.com example.net example.org
+#                     example.com's mailservers are also used for example.net and example.org.
+#                     fill in the same set of mailservers for those domains.
+# 
+#   domainincludes    myvanity.com  myisp.com     myschool.edu  
+#                     myvanity.com  myisp.com:10  myschool.edu:20
+#                     I control myvanity.com, but I don't actually have
+#                     any mail exchangers of my own.  I actually send mail
+#                     through myisp.com's and myschool.edu's servers.
+#                     I'm not at school very often, so the optional :10 and :20
+#                     priorities indicate recommended lookup ordering.
+# 
+
+EOTOP
+
+}
+
+# ----------------------------------------------------------
+# 		     format statements
+# ----------------------------------------------------------

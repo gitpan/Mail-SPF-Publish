@@ -1,0 +1,170 @@
+#!/usr/bin/perl -sw-
+
+# ----------------------------------------------------------
+#			  spf2zone
+# 
+# 		       Meng Weng Wong
+# $Id: spf2zone,v 1.4 2003/08/07 05:15:27 hachi Exp $
+# convert an SPF format config file to a zone file
+# 
+# usage: ./spf2zone.pl < auto.spf > auto.zone
+# 
+# arguments:
+# 
+# flags: -format=bind4 | tinydns
+#        -explicit=yes | no
+#        -ttl=86400 | 600
+# 
+# output:
+# 
+# license: GPL
+# 
+# see http://spf.pobox.com/
+# 
+# FILE FORMAT
+# 
+#   directive         default  | alternatives
+#   --------------------------------------------------
+#   format            bind4    | tinydns
+#   ttl               3600     | try 300 for testing, 86400 in production
+#   explicit          yes      | no
+#   domaindefault     deny     | softdeny
+# 
+# Definitions
+# 
+#   mailserver        mybox mybox.example.com 1.2.3.4 [...]
+#                     mybox is a mail gateway.
+#                     It identifies itself as mybox.example.com in the HELO line.
+#                     Its IP address is 1.2.3.4.  It may have more than one IP.
+#
+#   domaindefault     example.com deny
+#                     example.com softdeny
+#                     if you don't set this, "deny" is the default.
+#                     you should set softdeny if you have legit users mailing
+#                     through non-designated machines.
+#
+#   domainservers     example.com mybox [...]
+#                     example.com designates mybox as an outbound mail exchanger.
+#                     example.com may designate more than one mailserver.
+# 
+#   domaincopy        example.com example.net example.org
+#                     example.com's mailservers are also used for example.net and example.org.
+#                     fill in the same set of mailservers for those domains.
+# 
+#   domainincludes    myvanity.com  myisp.com     myschool.edu  
+#                     myvanity.com  myisp.com:10  myschool.edu:20
+#                     I control myvanity.com, but I don't actually have
+#                     any mail exchangers of my own.  I actually send mail
+#                     through myisp.com's and myschool.edu's servers.
+#                     I'm not at school very often, so the optional :10 and :20
+#                     priorities indicate recommended lookup ordering.
+# 
+# ----------------------------------------------------------
+
+# ----------------------------------------------------------
+# 		       initialization
+# ----------------------------------------------------------
+
+use Net::DNS;
+use Mail::SPF::Publish;
+use vars qw($format $explicit $ttl);
+our ($VERSION) = '$Id: spf2zone,v 1.4 2003/08/07 05:15:27 hachi Exp $' =~ /([\d.]{3,})/; # '
+
+# ----------------------------------------------------------
+# 	 no user-serviceable parts below this line
+# ----------------------------------------------------------
+
+use strict;
+
+# ----------------------------------------------------------
+#			    main
+# ----------------------------------------------------------
+
+$format ||= guess_format();
+$ttl    ||= 3600;
+$explicit = (! defined $explicit ? 1 :
+	     $explicit eq "yes"  ? 1 :
+	     $explicit eq "no"   ? 0 :
+	     $explicit);
+
+my $spf = Mail::SPF::Publish->new(output_type => $format,
+				  format => $format,
+				  ttl => $ttl);
+
+my %domainservers;
+my %domaindefaults;
+
+while (<>) {
+  chomp;
+  next if /^\s*$/;
+  next if /^\s*\#/;
+  
+  my ($command, @args) = split ' '; $command = lc $command;
+  
+  if    ($command eq "format")          { $format   = $args[0]; }
+  elsif ($command eq "ttl")             { $ttl      = $args[0]; }
+  elsif ($command eq "explicit")        { $explicit = $args[0] eq "no" ? 0 : $args[0]; }
+  elsif ($command eq "domaindefault")   { $domaindefaults{$args[0]} = $args[1]; }
+  elsif ($command eq "mailserver"
+      || $command eq "domainservers"
+      || $command eq "domainincludes" ) { my $domain = shift @args;
+                                          my @domainargs = (
+					    ($command eq "mailserver" ? shift @args : () ),
+					    [@args],
+					    default => (exists $domaindefaults{$domain} ? $domaindefaults{$domain} : 'deny')
+					  );
+                                          $spf->$command($domain, @domainargs);
+
+					  # save for later use by domaincopy.
+					  if ($command eq "domainservers") {
+					    $domainservers{$domain} = \@domainargs;
+					  }
+  }
+  elsif ($command eq "domaincopy") {
+
+    my $src_domain = shift @args;
+    if (not exists $domainservers{$src_domain}) {
+      die "$ARGV line $.: spf2zone: define \"domainservers $src_domain\" before \"domaincopy $src_domain @args\"\n";
+    }
+    foreach my $dst_domain (@args) {
+      $spf->domainservers($dst_domain, @{$domainservers{$src_domain}});
+    }
+  }
+  else {
+    warn "$ARGV line $.: unrecognized input: $_\n";
+  }
+}
+
+print header();
+print $spf->output;
+
+# ----------------------------------------------------------
+# 			 functions
+# ----------------------------------------------------------
+
+sub guess_format {
+  my $default = "bind4";
+
+  return "tinydns" if (-d "/service/tinydns" || -d "/service/dnscache");
+
+  return $default;
+}
+
+sub header {
+
+  my $LOCALTIME = localtime;
+
+  return <<"EOTOP";
+#
+# zone file for SPF subdomain
+# automatically generated $LOCALTIME
+#   by Mail::SPF::Publish $Mail::SPF::Publish::VERSION spf2zone.pl $VERSION 
+# 
+
+EOTOP
+
+}
+
+# ----------------------------------------------------------
+# 		     format statements
+# ----------------------------------------------------------

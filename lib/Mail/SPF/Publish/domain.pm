@@ -56,7 +56,7 @@ sub output {
   my $self = shift;
   my $type = shift;
 
-  if ($type =~ m/^bind9$/i) {
+  if ($type =~ m/^bind4$/i) {
     return $self->bind_out();
   }
   elsif ( $type =~ m/^tinydns$/i) {

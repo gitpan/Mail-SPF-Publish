@@ -1,0 +1,7 @@
+TODO list for Perl module Mail::SPF::Publish
+
+- IPv6 support
+- Consolidate v4 address ranges that fall on byte boundaries
+- Tests
+
+

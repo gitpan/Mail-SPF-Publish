@@ -1,0 +1,65 @@
+NAME
+    Mail::SPF::Publish - Assist in the creation of DNS records for the SPF
+    standard.
+
+SYNOPSIS
+      use Mail::SPF::Publish
+ 
+      spf_mailserver( "mail_one", "mail1.example.com", "10.0.0.1" );
+      spf_mailserver( "mail_two", "mail2.example.com", "10.0.0.2" );
+
+      spf_domainservers( "example.com", "mail_one", "mail_two" );
+
+      spf_fix_recursion();
+
+      print spf_output_bind9();
+
+DESCRIPTION
+    This module and it's associated sample code are intended to be used to
+    generate DNS records (tinydns and BIND9 so far) for SPF, including any
+    explicit wildcard recursion if necessary. The interface right now is
+    /very/ questionable as this has not been proofread by anyone yet. Please
+    be warned that this module may change considerable or not at all before
+    first release.
+
+USAGE
+  spf_mailserver
+     Usage     : spf_mailserver( alias, hostname, address );
+     Purpose   : Defines a mail server alias, and creates the SPF records for HELO lookups.
+     Returns   : Nothing yet
+     Arguments : alias    - string alias for this entry
+                 hostname - fully qualified domain name this mail server, and hostname name supplied at HELO phase.
+                 address  - network address of this mail server
+
+  spf_domainservers
+     Usage     : spf_domainservers( domain, alias, ... )
+     Purpose   : Create SPF records to indicate that servers identified by 'alias, ...' are allowed to send from 'domain'. All others are subject to the policy defined by spf_softhard()
+     Returns   : Nothing Yet
+     Arguments : domain - Domain name to which you are adding mail servers to for SPF record generation.
+                 alias, ... - List of server aliases, defined with the spf_mailserver() function.
+
+  spf_fix_recursion
+     Usage     : spf_fix_recursion()
+     Purpose   : Creates explicit wildcard domains to allow a workaround for RFC 1034 compliant name servers
+     Returns   : Nothing yet
+     Argument  : None
+
+BUGS
+    Undoubtably some, tests are the next thing on the list to be written.
+
+SUPPORT
+    Please contact the author with any comments or questions.
+
+AUTHOR
+    Jonathan Steinert hachi@cpan.org
+
+COPYRIGHT
+    This program is free software; you can redistribute it and/or modify it
+    under the same terms as Perl itself.
+
+    The full text of the license can be found in the LICENSE file included
+    with this module.
+
+SEE ALSO
+    http://spf.pobox.com/ Mail::SPF::Query perl(1).
+
